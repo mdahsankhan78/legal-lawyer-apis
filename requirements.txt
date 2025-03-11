@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+pymongo
+jinja2
+bcrypt
+python-multipart
+pydantic
+python-jose
+passlib
+transformers
+pillow
+pytesseract
+python-dotenv
+groq
+docx
+fitz  # PyMuPDF
