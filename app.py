@@ -104,12 +104,16 @@ class LegalAIService:
         legal_context = self._get_legal_context(question)
         full_context = f"{context}\n{legal_context}"
         
+        # Truncate the context to a certain number of tokens
+        max_tokens = 4000  # Adjust this based on your needs
+        truncated_context = self._truncate_text(full_context, max_tokens)
+        
         response = self.groq.chat.completions.create(
             messages=[{
                 "role": "user",
                 "content": Config.PROMPTS["LEGAL_ANSWER"].format(
                     question=question,
-                    context=full_context
+                    context=truncated_context
                 )
             }],
             model=Config.MODELS["RAG_MODEL"],
@@ -119,6 +123,13 @@ class LegalAIService:
             "response": response.choices[0].message.content,
             "sources": self._extract_sources(response.choices[0].message.content)
         }
+
+    def _truncate_text(self, text: str, max_tokens: int) -> str:
+        tokenizer = AutoTokenizer.from_pretrained(Config.MODELS["QA_MODEL"])
+        tokens = tokenizer.tokenize(text)
+        if len(tokens) > max_tokens:
+            tokens = tokens[:max_tokens]
+        return tokenizer.convert_tokens_to_string(tokens)
 
     def _get_legal_context(self, question: str) -> str:
         terms = self._extract_legal_terms(question)
