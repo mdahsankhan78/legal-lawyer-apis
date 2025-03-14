@@ -21,6 +21,9 @@ from docx import Document
 from PIL import Image
 import pytesseract
 
+# Set the Tesseract command path (adjust according to your system)
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+
 # ======================
 # Configuration
 # ======================
@@ -28,7 +31,7 @@ class Config:
     MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
     DB_NAME = "legal_ai_pro"
     SECRET_KEY = os.getenv("SECRET_KEY", "super-secret-key")
-    GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+    GROQ_API_KEY = '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'
     SESSION_TIMEOUT = 2  # hours
     MAX_FILE_SIZE = 5  # MB
     
@@ -51,7 +54,7 @@ Details: {{details}}""")
     MODELS = {
         "RAG_MODEL": "llama3-8b-8192",
         "QA_MODEL": "nlpaueb/legal-bert-base-uncased",
-        "NER_MODEL": "legisner/legalbert-base-uncased"
+        "NER_MODEL": "nlpaueb/legal-bert-base-uncased"
     }
     
     PROMPTS = {
