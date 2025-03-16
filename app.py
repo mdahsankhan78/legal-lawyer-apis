@@ -8,13 +8,14 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from bson import ObjectId
 import fitz  # PyMuPDF
+from fastapi import Response
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jinja2 import Template
 from pymongo import MongoClient, TEXT
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from transformers import pipeline, AutoTokenizer
 from groq import Groq
 from docx import Document
@@ -85,6 +86,7 @@ class DatabaseService:
     def _init_indexes(self):
         self.db.users.create_index("email", unique=True)
         self.db.laws.create_index([("text", TEXT)], weights={"text": 2})
+        self.db.chat_history.create_index("user_id")
 
 # ======================
 # AI Service
@@ -240,6 +242,13 @@ class UserResponse(BaseModel):
     name: Optional[str] = None
     created_at: datetime
 
+class ChatQuery(BaseModel):
+    question: str
+    answer: str
+
+class ChatHistory(BaseModel):
+    query: List[ChatQuery] = Field(..., description="List of chat queries and answers")
+
 # ======================
 # Endpoints
 # ======================
@@ -328,14 +337,29 @@ async def legal_query(
     except Exception as e:
         raise HTTPException(500, str(e))
 
+from fastapi.responses import FileResponse
+
 @app.post("/generate/fir")
 async def generate_fir(
     data: FIRRequest,
     user: dict = Depends(get_current_user)
 ):
     try:
+        # Render the FIR template with the provided data
         doc = Config.LEGAL_TEMPLATES["FIR"].render(**data.dict())
-        return {"document": doc, "format": "text/plain"}
+
+        # Create a file-like object in memory
+        fir_file = io.BytesIO(doc.encode('utf-8'))
+
+        # We need to write the in-memory BytesIO content to a file on disk to use with FileResponse
+        # Set the file path for saving the file temporarily
+        file_path = f"static/FIR_{data.station}_{data.date}.txt"
+
+        with open(file_path, "wb") as f:
+            f.write(fir_file.getvalue())
+
+        # Return the file response
+        return FileResponse(file_path, media_type="application/octet-stream", filename=f"FIR_{data.station}_{data.date}.txt")
     except Exception as e:
         raise HTTPException(500, str(e))
 
@@ -356,6 +380,65 @@ async def upload_laws(
             })
         
         return {"message": f"Added {len(chunks)} law chunks"}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+# Endpoints
+# ======================
+@app.post("/chat-history/add")
+async def add_chat_history(
+    history: ChatHistory,
+    user: dict = Depends(get_current_user)
+):
+    try:
+        history_data = history.dict()
+        history_data["user_id"] = user["_id"]  # Add user_id from the authenticated user
+        history_data["timestamp"] = datetime.utcnow()  # Add current timestamp
+        DatabaseService().db.chat_history.insert_one(history_data)
+        return {"message": "Chat history added successfully"}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.put("/chat-history/update/{history_id}")
+async def update_chat_history(
+    history_id: str,
+    history: ChatHistory,
+    user: dict = Depends(get_current_user)
+):
+    try:
+        DatabaseService().db.chat_history.update_one(
+            {"_id": ObjectId(history_id), "user_id": user["_id"]},
+            {"$set": history.dict()}
+        )
+        return {"message": "Chat history updated successfully"}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.get("/chat-history/get")
+async def get_chat_history(
+    user: dict = Depends(get_current_user)
+):
+    try:
+        # Fetch chat history for the current user
+        histories = list(DatabaseService().db.chat_history.find({"user_id": user["_id"]}))
+
+        # Convert ObjectId to string for each history item
+        for history in histories:
+            history["_id"] = str(history["_id"])  # Convert ObjectId to string
+            history["user_id"] = str(history["user_id"])  # Convert ObjectId to string (if user_id is ObjectId)
+
+        return {"histories": histories}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.delete("/chat-history/delete/{history_id}")
+async def delete_chat_history(
+    history_id: str,
+    user: dict = Depends(get_current_user)
+):
+    try:
+        DatabaseService().db.chat_history.delete_one({"_id": ObjectId(history_id), "user_id": user["_id"]})
+        return {"message": "Chat history deleted successfully"}
     except Exception as e:
         raise HTTPException(500, str(e))
 
