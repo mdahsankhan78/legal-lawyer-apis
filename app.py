@@ -404,8 +404,22 @@ async def add_chat_history(
             elif first_query.get("document"):
                 history_data["chatName"] = first_query["document"].get("filename", "Unnamed Document")
         
-        DatabaseService().db.chat_history.insert_one(history_data)
-        return {"message": "Chat history added successfully"}
+        # Insert the chat history into the database
+        result = DatabaseService().db.chat_history.insert_one(history_data)
+        
+        # Fetch the inserted document using the inserted_id
+        inserted_document = DatabaseService().db.chat_history.find_one({"_id": result.inserted_id})
+        
+        # Convert all ObjectId fields to strings
+        if inserted_document:
+            inserted_document["_id"] = str(inserted_document["_id"])
+            if "user_id" in inserted_document and isinstance(inserted_document["user_id"], ObjectId):
+                inserted_document["user_id"] = str(inserted_document["user_id"])
+        
+        return {
+            "message": "Chat history added successfully",
+            "chat_history": inserted_document  # Return the inserted document
+        }
     except Exception as e:
         raise HTTPException(500, str(e))
 
@@ -439,7 +453,7 @@ async def get_chat_history(
 ):
     try:
         # Fetch chat history for the current user
-        histories = list(DatabaseService().db.chat_history.find({"user_id": user["_id"]}))
+        histories = list(DatabaseService().db.chat_history.find({"user_id": user["_id"]}).sort("timestamp", -1))
 
         # Convert ObjectId to string for each history item
         for history in histories:
