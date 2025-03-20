@@ -172,7 +172,7 @@ class AuthService:
         self.db = DatabaseService().db
         self.secret_key = "alpha_beta_gamma"
 
-    def register(self, email: str, password: str, name: str):
+    def register(self, email: str, password: str, name: str, role: str = "User"):
         if self.db.users.find_one({"email": email}):
             raise HTTPException(400, "Email already registered")
         
@@ -180,6 +180,7 @@ class AuthService:
             "email": email,
             "password": bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode(),
             "name": name,
+            "role": role, 
             "created_at": datetime.utcnow()
         })
 
@@ -224,6 +225,10 @@ class User(BaseModel):
     email: str
     password: str
     name: Optional[str] = None
+    role: Optional[str] = Field(default="User", description="User role (User, Lawyer, Admin)")
+
+class UpdateUserRole(BaseModel):
+    role: str = Field(..., description="New role for the user (User, Lawyer, Admin)")
 
 class Query(BaseModel):
     question: str
@@ -240,6 +245,7 @@ class UserResponse(BaseModel):
     id: str
     email: str
     name: Optional[str] = None
+    role: Optional[str] = None
     created_at: datetime
 
 class ChatQuery(BaseModel):
@@ -267,13 +273,32 @@ async def register(user: User):
 @app.post("/auth/login")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     try:
+        # Authenticate the user and get the token
         token = AuthService().authenticate(form_data.username, form_data.password)
-        return {"access_token": token, "token_type": "bearer"}
+        
+        # Fetch the full user object from the database
+        user = DatabaseService().db.users.find_one({"email": form_data.username})
+        
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Convert ObjectId to string for the response
+        user["_id"] = str(user["_id"])
+        
+        # Exclude sensitive fields like password
+        user.pop("password", None)
+        
+        # Return the token and user details
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "user": user
+        }
     except HTTPException as e:
         raise e
     except Exception as e:
         raise HTTPException(500, str(e))
-
+    
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
         payload = jwt.decode(token, "alpha_beta_gamma", algorithms=["HS256"])
@@ -290,6 +315,34 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         raise HTTPException(status_code=401, detail="Token has expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+@app.get("/users", response_model=List[UserResponse])
+async def get_all_users(
+    current_user: dict = Depends(get_current_user)
+):
+    try:
+        # Only allow admins to fetch all users
+        if current_user.get("role") != "Admin":
+            raise HTTPException(status_code=403, detail="Only admins can fetch all users")
+
+        # Fetch all users from the database
+        users = list(DatabaseService().db.users.find())
+
+        # Convert ObjectId to string and exclude sensitive fields (e.g., password)
+        user_list = []
+        for user in users:
+            user_data = {
+                "id": str(user["_id"]),  # Rename "_id" to "id"
+                "email": user["email"],
+                "name": user.get("name"),  # Use .get() to handle missing fields safely
+                "role": user.get("role", "User"),  # Default to "User" if role is missing
+                "created_at": user["created_at"]
+            }
+            user_list.append(user_data)
+
+        return user_list
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # to get user by id
 @app.get("/users/{user_id}", response_model=UserResponse)
@@ -312,10 +365,36 @@ async def get_user_by_id(
             "id": str(user_object_id),
             "email": user_data["email"],
             "name": user_data.get("name"),
+            "role": user_data.get("role", "User"), 
             "created_at": user_data["created_at"]
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/users/update-role/{user_id}")
+async def update_user_role(
+    user_id: str,
+    role_data: UpdateUserRole,
+    current_user: dict = Depends(get_current_user)
+):
+    # Only allow admins to update roles
+    if current_user.get("role") != "Admin":
+        raise HTTPException(status_code=403, detail="Only admins can update roles")
+
+    # Validate the new role
+    if role_data.role not in ["User", "Lawyer", "Admin"]:
+        raise HTTPException(status_code=400, detail="Invalid role. Allowed roles: User, Lawyer, Admin")
+
+    # Update the user's role
+    result = DatabaseService().db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"role": role_data.role}}
+    )
+
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return {"message": f"User role updated to {role_data.role}"}
 
 @app.post("/analyze")
 async def analyze_document(
@@ -369,7 +448,6 @@ async def generate_fir(
 async def upload_laws(
     file: UploadFile = File(...),
     user: dict = Depends(get_current_user)):
-
     try:
         text = DocumentProcessor.process_file(file)
         chunks = [text[i:i+384] for i in range(0, len(text), 384)]
@@ -385,7 +463,95 @@ async def upload_laws(
     except Exception as e:
         raise HTTPException(500, str(e))
 
-# Endpoints
+@app.put("/laws/update/{law_id}")
+async def update_law(
+    law_id: str,
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
+):
+    try:
+        # Fetch the existing law
+        existing_law = DatabaseService().db.laws.find_one({"_id": ObjectId(law_id)})
+        if not existing_law:
+            raise HTTPException(status_code=404, detail="Law not found")
+
+        # Prepare the update data
+        update_data = {}
+        text = DocumentProcessor.process_file(file)
+            
+        # If no update data is provided, return an error
+        if not update_data:
+            raise HTTPException(status_code=400, detail="No update data provided")
+
+        # Update the law in the database
+        result = DatabaseService().db.laws.update_one(
+            {"_id": ObjectId(law_id)},
+            {"$set": update_data}
+        )
+
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Law not found")
+
+        return {"message": "Law updated successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/laws", response_model=List[Dict])
+async def get_all_laws(
+    current_user: dict = Depends(get_current_user)
+):
+    try:
+        # Fetch all laws from the database
+        laws = list(DatabaseService().db.laws.find())
+
+        # Convert ObjectId to string for each law
+        for law in laws:
+            law["_id"] = str(law["_id"])
+
+        return laws
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/laws/{law_id}", response_model=Dict)
+async def get_law_by_id(
+    law_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    try:
+        # Fetch the law by ID
+        law = DatabaseService().db.laws.find_one({"_id": ObjectId(law_id)})
+
+        if not law:
+            raise HTTPException(status_code=404, detail="Law not found")
+
+        # Convert ObjectId to string
+        law["_id"] = str(law["_id"])
+
+        return law
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.delete("/laws/delete/{law_id}")
+async def delete_law(
+    law_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    try:
+        # Only allow admins to delete laws
+        if current_user.get("role") != "Admin":
+            raise HTTPException(status_code=403, detail="Only admins can delete laws")
+
+        # Delete the law from the database
+        result = DatabaseService().db.laws.delete_one({"_id": ObjectId(law_id)})
+
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Law not found")
+
+        return {"message": "Law deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+# Chat History Endpoints
 # ======================
 @app.post("/chat-history/add")
 async def add_chat_history(
