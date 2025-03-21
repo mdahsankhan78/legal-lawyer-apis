@@ -537,10 +537,6 @@ async def delete_law(
     current_user: dict = Depends(get_current_user)
 ):
     try:
-        # Only allow admins to delete laws
-        if current_user.get("role") != "Admin":
-            raise HTTPException(status_code=403, detail="Only admins can delete laws")
-
         # Delete the law from the database
         result = DatabaseService().db.laws.delete_one({"_id": ObjectId(law_id)})
 
