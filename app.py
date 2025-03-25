@@ -257,6 +257,9 @@ class ChatHistory(BaseModel):
     query: List[ChatQuery] = Field(..., description="List of chat queries and answers")
     chatName: Optional[str] = Field(None, description="Name of the chat (first question)")
 
+class LawSearchQuery(BaseModel):
+    query: str = Field(..., description="Search query for legal provisions")
+    limit: Optional[int] = Field(5, description="Maximum number of results to return", ge=1, le=20)
 # ======================
 # Endpoints
 # ======================
@@ -547,6 +550,35 @@ async def delete_law(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
+@app.post("/laws/search", response_model=List[Dict])
+async def search_laws(
+    search: LawSearchQuery,
+    current_user: dict = Depends(get_current_user)
+):
+    try:
+        # Perform text search in the laws collection
+        results = DatabaseService().db.laws.find(
+            {"$text": {"$search": search.query}},
+            {"text": 1, "source": 1, "timestamp": 1, "score": {"$meta": "textScore"}}
+        ).sort("score", -1).limit(search.limit)
+
+        # Convert results to list of dictionaries and handle ObjectId
+        law_results = []
+        for doc in results:
+            law_data = {
+                "id": str(doc["_id"]),
+                "text": doc["text"],
+                "source": doc.get("source", "Unknown"),
+                "timestamp": doc.get("timestamp"),
+                "score": doc.get("score", 0)
+            }
+            law_results.append(law_data)
+
+        return law_results
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+        
 # Chat History Endpoints
 # ======================
 @app.post("/chat-history/add")
