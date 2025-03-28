@@ -579,6 +579,32 @@ async def search_laws(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
         
+# Add this endpoint in your backend file
+@app.get("/laws/download/{law_id}")
+async def download_law(
+    law_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    try:
+        law = DatabaseService().db.laws.find_one({"_id": ObjectId(law_id)})
+        if not law:
+            raise HTTPException(status_code=404, detail="Law not found")
+        
+        law_content = law["text"]
+        law_file = io.BytesIO(law_content.encode('utf-8'))
+        
+        filename = f"law_{law.get('source', law_id)}.txt"
+        
+        return Response(
+            content=law_file.getvalue(),
+            media_type="application/octet-stream",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+           
 # Chat History Endpoints
 # ======================
 @app.post("/chat-history/add")
