@@ -29,7 +29,7 @@ pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tessera
 # Configuration
 # ======================
 class Config:
-    MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+    MONGODB_URI = os.getenv("MONGODB_URI", "mongodb+srv://mahsankh77:fkp51svj@cluster1st.o6bsc.mongodb.net/")
     DB_NAME = "legal_ai_pro"
     SECRET_KEY = os.getenv("SECRET_KEY", "super-secret-key")
     GROQ_API_KEY = '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'
@@ -263,6 +263,10 @@ class LawSearchQuery(BaseModel):
 # ======================
 # Endpoints
 # ======================
+@app.get("/")
+def read_root():
+    return {"message": "Hello from FastAPI on Vercel"}
+
 @app.post("/auth/register")
 async def register(user: User):
     try:
