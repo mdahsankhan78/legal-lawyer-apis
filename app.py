@@ -104,7 +104,28 @@ class LegalAIService:
         )
         self.ner_pipeline = pipeline("ner", model=Config.MODELS["NER_MODEL"])
 
+        # Define legal-related keywords
+        self.legal_keywords = [
+            "law", "legal", "court", "case", "lawyer", "judge", "section", "act", 
+            "constitution", "rights", "justice", "crime", "contract", "agreement", 
+            "property", "fir", "police", "evidence", "bail", "trial", "verdict", 
+            "penalty", "dispute", "litigation", "jurisdiction"
+        ]
+
+    def is_legal_relevant(self, question: str) -> bool:
+        """
+        Check if the query is relevant to legal topics based on keywords.
+        Returns True if relevant, False otherwise.
+        """
+        question_lower = question.lower()
+        return any(keyword in question_lower for keyword in self.legal_keywords)
+    
     def rag_query(self, question: str, context: str = "") -> dict:
+        if not self.is_legal_relevant(question):
+            return {
+                "response": "Sorry, I can assist you with that. Please ask a legal-related question.",
+                "sources": []
+            }
         legal_context = self._get_legal_context(question)
         full_context = f"{context}\n{legal_context}"
         
