@@ -4,6 +4,7 @@ import jwt
 import io
 import bcrypt
 import secrets
+import certifi
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from bson import ObjectId
@@ -29,7 +30,8 @@ pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tessera
 # Configuration
 # ======================
 class Config:
-    MONGODB_URI = os.getenv("MONGODB_URI", "mongodb+srv://mahsankh77:fkp51svj@cluster1st.o6bsc.mongodb.net/")
+    MONGODB_URI = os.getenv("MONGODB_URI", "mongodb+srv://mahsankh77:fkp51svj@cluster1st.o6bsc.mongodb.net/?retryWrites=true&w=majority&appName=Cluster1st")
+    # MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
     DB_NAME = "legal_ai_pro"
     SECRET_KEY = os.getenv("SECRET_KEY", "super-secret-key")
     GROQ_API_KEY = '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'
